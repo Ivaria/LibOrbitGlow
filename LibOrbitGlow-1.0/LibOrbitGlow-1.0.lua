@@ -1,5 +1,5 @@
 local MAJOR_VERSION = "LibOrbitGlow-1.0"
-local MINOR_VERSION = 8
+local MINOR_VERSION = 9
 local lib = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
 if not lib then return end
 
@@ -19,8 +19,7 @@ local DEFAULT_PIXEL_PERIOD = 4
 local DEFAULT_PIXEL_THICKNESS = 2
 local PIXEL_BORDER_COLOR = { 0.05, 0.05, 0.05, 0.85 }
 local PIXEL_FREQ_SCALAR = 0.25
--- Negative frequency = period multiplier `1 + |freq| * SLOWDOWN_SCALAR` over the engine baseline.
--- Same scalar across engines so slider position has consistent relative meaning between Pixel/Autocast.
+-- Negative frequency = period multiplier `1 + |freq| * SLOWDOWN_SCALAR` over baseline; one scalar across engines keeps slider meaning consistent (Pixel/Autocast).
 local FREQ_SLOWDOWN_SCALAR = 8
 local PIXEL_LENGTH_SCALAR = 3
 local PIXEL_LENGTH_FACTOR = 0.1
@@ -57,8 +56,7 @@ local function PerimeterPoint(d, w, h)
     return 0, h - d
 end
 
--- Resolves animation period from frequency. Positive = faster than baseline (period = posScalar/freq),
--- zero/nil = baseline, negative = slower (period = baseline * (1 + |freq| * FREQ_SLOWDOWN_SCALAR)).
+-- Period from frequency: positive = faster (posScalar/freq), zero/nil = baseline, negative = slower (baseline * (1 + |freq| * FREQ_SLOWDOWN_SCALAR)).
 local function ResolvePeriod(freq, baseline, posScalar)
     if not freq or freq == 0 then return baseline end
     if freq > 0 then return posScalar / freq end
@@ -687,6 +685,35 @@ local function ConfigureButtonGlow(f, alpha)
     CreateAlphaAnim(f.animOut, "ants",          1, 0.2, alpha, 0, nil, false)
     CreateAlphaAnim(f.animOut, "outerGlowOver", 2, 0.2, alpha, 0, nil, false)
     CreateAlphaAnim(f.animOut, "outerGlow",     2, 0.2, alpha, 0, nil, false)
+end
+
+-- AnimateTexCoords was removed as a global in 12.1; inline Blizzard's sprite-sheet stepper.
+local function AnimateTexCoords(texture, textureWidth, textureHeight, frameWidth, frameHeight, numFrames, elapsed, throttle)
+    if not texture.frame then
+        texture.frame = 1
+        texture.throttle = throttle
+        texture.numColumns = math.floor(textureWidth / frameWidth)
+        texture.numRows = math.floor(textureHeight / frameHeight)
+        texture.columnWidth = frameWidth / textureWidth
+        texture.rowHeight = frameHeight / textureHeight
+    end
+    local frame = texture.frame
+    if not texture.throttle or texture.throttle > throttle then
+        local framesToAdvance = math.floor(texture.throttle / throttle)
+        while frame + framesToAdvance > numFrames do
+            frame = frame - numFrames
+        end
+        frame = frame + framesToAdvance
+        texture.throttle = 0
+        local left = ((frame - 1) % texture.numColumns) * texture.columnWidth
+        local right = left + texture.columnWidth
+        local bottom = math.ceil(frame / texture.numColumns) * texture.rowHeight
+        local top = bottom - texture.rowHeight
+        texture:SetTexCoord(left, right, top, bottom)
+        texture.frame = frame
+    else
+        texture.throttle = texture.throttle + elapsed
+    end
 end
 
 local function ButtonForwardOnUpdate(self, elapsed)
