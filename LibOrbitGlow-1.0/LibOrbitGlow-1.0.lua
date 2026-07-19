@@ -36,7 +36,7 @@ local BUTTON_GLOW_TEXTURES = { "spark", "innerGlow", "innerGlowOver", "outerGlow
 local THIN_ATLAS = "RotationHelper_Ants_Flipbook_2x"
 local THICK_ATLAS = "RotationHelper-ProcLoopBlue-Flipbook-2x"
 local MEDIUM_ATLAS = "UI-HUD-ActionBar-Proc-Loop-Flipbook"
-local TARGET_FRAME_TIME = 1 / 60 -- Lock math evaluation to maximum of 60 FPS
+local TARGET_FRAME_TIME = 1 / 60
 
 -- [ UTILITIES ] ---------------------------------------------------------------
 -- Snap a coordinate to the device-pixel grid; step (pixelScale / effectiveScale) <= 0 falls back to whole-UI-unit rounding.
@@ -190,7 +190,7 @@ function lib.Flipbook:Show(frame, options)
     options = options or {}
     local r, g, b, a = GetColorRGBA(options.color)
     local nameKey = "_LibGlowFlipbook" .. (options.key or "Default")
-    -- Visual signature (everything but colour). A matching sig on a live frame means a re-show only re-tints; a changed atlas/geometry/timing falls through to a full rebuild. Lets Proc re-drive a glow every event with no teardown+animation-restart, and keeps geometry live without a Hide first.
+    -- Visual signature excluding colour: a match on a live frame means a re-show only re-tints, so a glow can be re-driven every event with no teardown and animation restart.
     local sig = (options.atlas or "") .. "|" .. (options.isTexture and "T" or "A") .. "|" .. (options.rows or "") .. "|" .. (options.cols or "") .. "|" .. (options.frames or "") .. "|" .. (options.speed or "") .. "|" .. (options.blendMode or "") .. "|" .. (options.N or 1) .. "|" .. (options.scale or "") .. "|" .. (options.offsetScale or "") .. "|" .. (options.offsetX or "") .. "|" .. (options.offsetY or "") .. "|" .. (options.padding or "") .. "|" .. (options.desaturated == false and "0" or "1") .. "|" .. (options.frameLevel or "")
     local existing = frame[nameKey]
     if existing and existing:IsShown() and existing.textures and existing.textures[1] then
@@ -264,7 +264,6 @@ function lib.Flipbook:Hide(frame, key)
 end
 
 -- [ GLOW REGISTRY ] -----------------------------------------------------------
--- Media packs (e.g. Orbit-Glow-Pack) call lib:RegisterGlow(name, def); the lib owns no pack textures -- only the baselines below. See README "Build a glow pack" for every def field (path/resolve/atlas/engine, layered/core, phases/loopOnly, shaped/ext, rows/cols/frames, shapes, blendMode, scale, source).
 lib.glows = lib.glows or {}
 lib.defaultGlow = lib.defaultGlow or "blizzard"
 
@@ -305,7 +304,7 @@ function lib:GetGlowList()
 end
 
 -- [ PROC LIFECYCLE -- registry-resolved start -> loop -> end ] -----------------
--- A LAYERED glow draws two stacked grayscale layers per phase: a BLEND body (tinted, fills the icon) + an ADD near-white core (the hot center = depth); both recolour via SetVertexColor. A single-atlas glow (the Blizzard baseline) draws one desaturated, vertex-tinted layer.
+-- A layered glow stacks a BLEND body and an ADD near-white core per phase, both recoloured via SetVertexColor; a single-atlas glow draws one desaturated vertex-tinted layer.
 lib.Proc = {}
 
 local function CoreColor(color)
@@ -315,7 +314,6 @@ end
 
 local LAYER_BODY, LAYER_CORE, LAYER_CORE_KEY = "", "-core", "\1core"
 
--- Requested shape if the pack ships it, else its square art, else any shape it provides.
 local function ResolveShape(def, shape)
     local shapes = def.shapes
     if shape and shapes and shapes[shape] then return shape end
@@ -336,7 +334,7 @@ local function TextureLayers(def)
     return { { suffix = LAYER_BODY, keySuffix = LAYER_BODY, blend = def.blendMode or "ADD", core = false } }
 end
 
--- Texture path for (phase, shape, layer); nil = that combination doesn't exist, so the caller skips it. Default contract "<path>-<phase>[-<shape>]<layer><ext>"; override the whole scheme with def.resolve(phase, shape, layer).
+-- Default path contract is "<path>-<phase>[-<shape>]<layer><ext>"; nil means that combination does not exist and the caller skips it.
 local function ResolvePath(def, phase, shape, suffix)
     if def.phases and not def.phases[phase] then return nil end
     if def.resolve then return def.resolve(phase, shape, suffix) end
@@ -433,7 +431,6 @@ function lib.Proc:Stop(frame, options)
     end
 end
 
--- Continuous loop only (no start/end) -- for previews/showcases that just want the glow running.
 function lib.Proc:Loop(frame, options)
     options = options or {}
     local def = ResolveGlow(options)
@@ -452,7 +449,6 @@ function lib.Proc:Clear(frame, options)
     lib.Flipbook:Hide(frame, (options.key or "proc") .. LAYER_CORE_KEY)
 end
 
--- Dev affordance: the exact texture paths the lib will try for `name` (every phase x layer it ships), so a pack author can eyeball them against disk when a glow renders blank. {engine=...}/{atlas=...} for non-file glows; nil if unregistered. (Set lib.DEBUG=true to print each path as it plays.)
 function lib:GetResolvedPaths(name, shape)
     local def = lib.glows[name]
     if not def then return nil end
@@ -469,7 +465,6 @@ function lib:GetResolvedPaths(name, shape)
     return out
 end
 
--- Baseline WoW glows (single Blizzard flipbook atlases) -- always available even with no media pack installed.
 lib:RegisterGlow("blizzard", { atlas = "UI-HUD-ActionBar-Proc-Loop-Flipbook", layered = false, blendMode = "ADD", source = "LibOrbitGlow" })
 lib:RegisterGlow("blizzardants", { atlas = "RotationHelper_Ants_Flipbook_2x", layered = false, blendMode = "ADD", source = "LibOrbitGlow" })
 lib:RegisterGlow("blizzardblue", { atlas = "RotationHelper-ProcLoopBlue-Flipbook-2x", layered = false, blendMode = "ADD", source = "LibOrbitGlow" })
@@ -748,7 +743,7 @@ function lib.Button:Show(frame, options)
     local nameKey = "_LibGlowButton" .. (options.key or "Default")
     if frame[nameKey] then
         local f = frame[nameKey]
-        -- A re-show inside the fade-out window must cancel animOut, or its OnFinished later releases this still-owned frame back to the pool (vanishing/bleeding glow). Stop() fires OnStop, not OnFinished, so it won't release; replay the intro to restore the steady glow.
+        -- A re-show inside the fade-out window must cancel animOut or its OnFinished releases this still-owned frame back to the pool; Stop() fires OnStop, not OnFinished, so it won't release.
         if f.animOut and f.animOut:IsPlaying() then f.animOut:Stop(); if f.animIn then f.animIn:Play() end end
         f.color = { r, g, b, a }
         for _, texName in ipairs(BUTTON_GLOW_TEXTURES) do
@@ -798,7 +793,7 @@ end
 -- [ PIXEL GLOW ] --------------------------------------------------------------
 lib.Pixel = {}
 
--- Band rect (frame-local, y down+) for the dash over arc [d0, d0+length]: split at each corner so a corner-crossing dash spans both edge bands, each inflated inward by `th` for the inner-hole mask to carve.
+-- Band rect (frame-local, y down+) split at each corner so a corner-crossing dash spans both edge bands, each inflated inward by `th` for the inner-hole mask to carve.
 local function PixelDashRect(d0, length, w, h, th, perim, c1, c2, c3)
     local d1 = d0 + length
     local minx, miny, maxx, maxy = math.huge, math.huge, -math.huge, -math.huge
@@ -815,16 +810,16 @@ local function PixelDashRect(d0, length, w, h, th, perim, c1, c2, c3)
         local x1, y1 = PerimeterPoint(b % perim, w, h)
         local mm = ((a + b) * 0.5) % perim
         local rx0, ry0, rx1, ry1
-        if mm < c1 then            -- top edge: band runs down from y=0
+        if mm < c1 then
             rx0, rx1 = (x0 < x1) and x0 or x1, (x0 > x1) and x0 or x1
             ry0, ry1 = 0, th
-        elseif mm < c2 then        -- right edge: band runs left from x=w
+        elseif mm < c2 then
             ry0, ry1 = (y0 < y1) and y0 or y1, (y0 > y1) and y0 or y1
             rx0, rx1 = w - th, w
-        elseif mm < c3 then        -- bottom edge: band runs up from y=h
+        elseif mm < c3 then
             rx0, rx1 = (x0 < x1) and x0 or x1, (x0 > x1) and x0 or x1
             ry0, ry1 = h - th, h
-        else                        -- left edge: band runs right from x=0
+        else
             ry0, ry1 = (y0 < y1) and y0 or y1, (y0 > y1) and y0 or y1
             rx0, rx1 = 0, th
         end
@@ -983,7 +978,7 @@ function lib.Hide(frame, glowType, key)
     handler(frame, key)
 end
 
--- Recommended high-level API (dot-called, like Show/Hide): `id` is EITHER an engine type ("Pixel"/"Thin"/...) OR a registered glow name -- registered names play the full proc lifecycle (start->loop, end on Remove), engine types show directly, so callers can pass an id straight from a saved setting. Pass options.loop=true for a continuous glow with no intro (the outro still plays on Remove unless you Proc:Clear; routes registered names to Proc:Loop). Apply sets options.glow on the passed table.
+-- `id` is either an engine type or a registered glow name, so callers can pass one straight from a saved setting; registered names play the full proc lifecycle, engine types show directly.
 function lib.Apply(frame, id, options)
     options = options or {}
     if lib.glows[id] then
@@ -995,7 +990,7 @@ function lib.Apply(frame, id, options)
 end
 
 function lib.Remove(frame, id, key)
-    if type(key) == "table" then key = key.key end      -- accept the same options table passed to Apply, or a bare key string
+    if type(key) == "table" then key = key.key end
     if lib.glows[id] then
         lib.Proc:Stop(frame, { glow = id, key = key })
     else

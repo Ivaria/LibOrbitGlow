@@ -3,7 +3,6 @@ if not (LCG and LCG.GetGlowList) then return end
 if LCG.Showcase then return end
 
 -- [ GLOW SHOWCASE ] ---------------------------------------------------------------------------------
--- /orbitglow grids every registered glow grouped by source; loop-only; collapsible scrollable sections; left-click -> ActionButton1, right-click -> re-roll colours. Self-contained dev/demo tool -- depends only on LibOrbitGlow + WoW APIs.
 
 local SHOW_PALETTE = {
     { 0.95, 0.25, 0.25, 1 }, { 1.00, 0.55, 0.15, 1 }, { 1.00, 0.82, 0.20, 1 }, { 0.40, 0.92, 0.40, 1 },
@@ -24,7 +23,6 @@ local HEADER_TOP, MAX_VIEWPORT = 52, 460
 local SHOW_KEY, TEST_KEY = "show", "orbitglowtest"
 local panel, currentButtonGlow
 
--- Registered glows bucketed by def.source; LibOrbitGlow's own defaults ordered first, then packs A-Z.
 local function GroupedGlows()
     local buckets, order = {}, {}
     for _, name in ipairs(LCG:GetGlowList()) do
@@ -203,7 +201,6 @@ local function Start()
     end
 end
 
--- Public API -- any addon that embeds the library can open the showcase: LibStub("LibOrbitGlow-1.0").Showcase:Toggle().
 LCG.Showcase = {}
 function LCG.Showcase:Toggle() if panel and panel:IsShown() then Stop() else Start() end end
 function LCG.Showcase:Show() if not (panel and panel:IsShown()) then Start() end end
