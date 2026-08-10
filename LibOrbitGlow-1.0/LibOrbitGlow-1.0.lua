@@ -1,5 +1,5 @@
 local MAJOR_VERSION = "LibOrbitGlow-1.0"
-local MINOR_VERSION = 9
+local MINOR_VERSION = 10
 local lib = LibStub:NewLibrary(MAJOR_VERSION, MINOR_VERSION)
 if not lib then return end
 
@@ -183,6 +183,26 @@ local function UpdateFlipbookTexture(texture, currentFrame, rows, cols)
     texture:SetTexCoord(col * frameW, (col + 1) * frameW, row * frameH, (row + 1) * frameH)
 end
 
+local function UpdateFlipbookAtlasTexture(texture, currentFrame, atlas, rows, cols)
+    local info = C_Texture and C_Texture.GetAtlasInfo and C_Texture.GetAtlasInfo(atlas)
+    if not info then return end
+    texture:SetTexture(info.file or info.filename)
+    local atlasLeft = info.leftTexCoord or info.LeftTexCoord or 0
+    local atlasRight = info.rightTexCoord or info.RightTexCoord or 1
+    local atlasTop = info.topTexCoord or info.TopTexCoord or 0
+    local atlasBottom = info.bottomTexCoord or info.BottomTexCoord or 1
+    local col = currentFrame % cols
+    local row = math.floor(currentFrame / cols)
+    local cellW = (atlasRight - atlasLeft) / cols
+    local cellH = (atlasBottom - atlasTop) / rows
+    texture:SetTexCoord(
+        atlasLeft + col * cellW,
+        atlasLeft + (col + 1) * cellW,
+        atlasTop + row * cellH,
+        atlasTop + (row + 1) * cellH
+    )
+end
+
 -- [ FLIPBOOK / PROC GLOW ] ----------------------------------------------------
 lib.Flipbook = {}
 
@@ -191,12 +211,12 @@ function lib.Flipbook:Show(frame, options)
     local r, g, b, a = GetColorRGBA(options.color)
     local nameKey = "_LibGlowFlipbook" .. (options.key or "Default")
     -- Visual signature excluding colour: a match on a live frame means a re-show only re-tints, so a glow can be re-driven every event with no teardown and animation restart.
-    local sig = (options.atlas or "") .. "|" .. (options.isTexture and "T" or "A") .. "|" .. (options.rows or "") .. "|" .. (options.cols or "") .. "|" .. (options.frames or "") .. "|" .. (options.speed or "") .. "|" .. (options.blendMode or "") .. "|" .. (options.N or 1) .. "|" .. (options.scale or "") .. "|" .. (options.offsetScale or "") .. "|" .. (options.offsetX or "") .. "|" .. (options.offsetY or "") .. "|" .. (options.padding or "") .. "|" .. (options.desaturated == false and "0" or "1") .. "|" .. (options.frameLevel or "")
+    local sig = (options.atlas or "") .. "|" .. (options.isTexture and "T" or "A") .. "|" .. (options.rows or "") .. "|" .. (options.cols or "") .. "|" .. (options.frames or "") .. "|" .. (options.speed or "") .. "|" .. (options.blendMode or "") .. "|" .. (options.N or 1) .. "|" .. (options.scale or "") .. "|" .. (options.offsetScale or "") .. "|" .. (options.offsetX or "") .. "|" .. (options.offsetY or "") .. "|" .. (options.padding or "") .. "|" .. (options.desaturated == false and "0" or "1") .. "|" .. (options.frameLevel or "") .. "|" .. (options.static and "S" or "")
     local existing = frame[nameKey]
     if existing and existing:IsShown() and existing.textures and existing.textures[1] then
         local tex1 = existing.textures[1]
         local isAnimating = (tex1.animGroup and tex1.animGroup:IsPlaying()) or existing:GetScript("OnUpdate")
-        if isAnimating and existing.sig == sig and not options.force then
+        if (isAnimating or options.static) and existing.sig == sig and not options.force then
             ApplyPaddedAnchors(existing, frame, options.scale or DEFAULT_FLIPBOOK_SCALE, options.offsetScale, options.padding, options.offsetX, options.offsetY)
             for i = 1, #existing.textures do existing.textures[i]:SetVertexColor(r, g, b, a) end
             return
@@ -236,6 +256,7 @@ function lib.Flipbook:Show(frame, options)
     end
     f:SetScript("OnUpdate", nil)
     local once = options.once or false
+    local staticFrameIdx = math.floor(frames / 2) - 1
     for i = 1, N do
         local texLoop = f.textures[i]
         if not texLoop.animGroup then
@@ -251,7 +272,15 @@ function lib.Flipbook:Show(frame, options)
         texLoop.flipbookAnim:SetFlipBookColumns(cols)
         texLoop.flipbookAnim:SetFlipBookFrames(frames)
         texLoop.animGroup:Stop()
-        texLoop.animGroup:Play()
+        if options.static then
+            if isTexture then
+                UpdateFlipbookTexture(texLoop, staticFrameIdx, rows, cols)
+            else
+                UpdateFlipbookAtlasTexture(texLoop, staticFrameIdx, atlas, rows, cols)
+            end
+        else
+            texLoop.animGroup:Play()
+        end
     end
 end
 
@@ -350,9 +379,9 @@ local function LayerOptions(def, o, path, keySuffix, isCore, blendMode, color, o
         frameLevel = o.frameLevel and (o.frameLevel + (isCore and 1 or 0)) or nil,
         scale = o.scale or def.scale, padding = o.padding, offsetScale = o.offsetScale,
         offsetX = o.offsetX, offsetY = o.offsetY,
-        isTexture = true, desaturated = false, blendMode = blendMode, atlas = path,
+        isTexture = true, desaturated = false, blendMode = (not isCore and o.blendMode) or blendMode, atlas = path,
         rows = def.rows or PROC_ROWS, cols = def.cols or PROC_COLS, frames = def.frames or PROC_FRAMES,
-        speed = duration, once = once, onFinished = onFinished,
+        speed = duration, once = once, onFinished = onFinished, static = o.static,
     }
 end
 
@@ -362,8 +391,8 @@ local function AtlasOptions(def, o, once, duration, onFinished)
         scale = o.scale or def.scale, padding = o.padding, offsetScale = o.offsetScale,
         offsetX = o.offsetX, offsetY = o.offsetY,
         isTexture = false, atlas = def.atlas, desaturated = def.desaturated ~= false,
-        blendMode = def.blendMode or "ADD", rows = def.rows, cols = def.cols, frames = def.frames,
-        speed = duration, once = once, onFinished = onFinished,
+        blendMode = o.blendMode or def.blendMode or "ADD", rows = def.rows, cols = def.cols, frames = def.frames,
+        speed = duration, once = once, onFinished = onFinished, static = o.static,
     }
 end
 
@@ -440,13 +469,15 @@ end
 
 function lib.Proc:Clear(frame, options)
     options = options or {}
-    local def = ResolveGlow(options)      -- same fallback Start/Stop/Loop use, so the engine-vs-flipbook teardown matches what was shown
-    if def and def.engine then
-        lib.Hide(frame, def.engine, options.key or "proc")
-        return
-    end
-    lib.Flipbook:Hide(frame, options.key or "proc")
-    lib.Flipbook:Hide(frame, (options.key or "proc") .. LAYER_CORE_KEY)
+    local key = options.key or "proc"
+    lib.Flipbook:Hide(frame, key)
+    lib.Flipbook:Hide(frame, key .. LAYER_CORE_KEY)
+    lib.Hide(frame, "Thin", key)
+    lib.Hide(frame, "Thick", key)
+    lib.Hide(frame, "Medium", key)
+    lib.Hide(frame, "Autocast", key)
+    lib.Hide(frame, "Classic", key)
+    lib.Hide(frame, "Pixel", key)
 end
 
 function lib:GetResolvedPaths(name, shape)
